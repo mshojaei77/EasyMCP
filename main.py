@@ -4,8 +4,9 @@ import os
 from typing import Optional
 from contextlib import AsyncExitStack
 
-from mcp import ClientSession
+from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
+from mcp.client.stdio import stdio_client
 
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -16,6 +17,8 @@ class MCPClient:
     def __init__(self):
         # Initialize session and client objects
         self.session: Optional[ClientSession] = None
+        self._streams_context = None
+        self._session_context = None
         self.exit_stack = AsyncExitStack()
         self.openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = os.getenv("OPENAI_MODEL", "gpt-4o")
@@ -34,6 +37,37 @@ class MCPClient:
 
         # List available tools to verify connection
         print("Initialized SSE client...")
+        print("Listing tools...")
+        response = await self.session.list_tools()
+        tools = response.tools
+        print("\nConnected to server with tools:", [tool.name for tool in tools])
+
+    async def connect_to_stdio_server(self, command: str, args: list):
+        """Connect to an MCP server running with STDIO transport (NPX, UV, etc.)"""
+        # On Windows, we need to use cmd.exe to run npx
+        if os.name == 'nt' and command in ['npx', 'uv']:
+            # Convert the command and args to a single command string for cmd.exe
+            cmd_args = ' '.join([command] + args)
+            server_params = StdioServerParameters(
+                command='cmd.exe',
+                args=['/c', cmd_args]
+            )
+        else:
+            # For non-Windows systems or other commands
+            server_params = StdioServerParameters(command=command, args=args)
+        
+        # Store the context managers so they stay alive
+        self._streams_context = stdio_client(server_params)
+        streams = await self._streams_context.__aenter__()
+
+        self._session_context = ClientSession(*streams)
+        self.session: ClientSession = await self._session_context.__aenter__()
+
+        # Initialize
+        await self.session.initialize()
+
+        # List available tools to verify connection
+        print(f"Initialized {command.upper()} client...")
         print("Listing tools...")
         response = await self.session.list_tools()
         tools = response.tools
@@ -177,35 +211,86 @@ class MCPClient:
 
 
 async def main():
-    # Load configuration from sse_servers.json
-    with open('sse_servers.json', 'r') as f:
-        config = json.load(f)
+    # Initialize empty servers dictionary
+    servers = {}
+    server_types = {}
     
-    # Print available servers
-    servers = config.get('mcpServers', {})
+    # Load configuration from sse_servers.json
+    try:
+        with open('sse_servers.json', 'r') as f:
+            sse_config = json.load(f)
+            sse_servers = sse_config.get('mcpServers', {})
+            for name, server in sse_servers.items():
+                servers[name] = server
+                server_types[name] = "sse"
+        print("Loaded SSE servers configuration.")
+    except FileNotFoundError:
+        print("sse_servers.json not found, continuing without SSE servers.")
+    except json.JSONDecodeError:
+        print("Error parsing sse_servers.json, continuing without SSE servers.")
+    
+    # Load configuration from npx_servers.json
+    try:
+        with open('npx_servers.json', 'r') as f:
+            npx_config = json.load(f)
+            npx_servers = npx_config.get('mcpServers', {})
+            for name, server in npx_servers.items():
+                servers[name] = server
+                server_types[name] = "npx"
+        print("Loaded NPX servers configuration.")
+    except FileNotFoundError:
+        print("npx_servers.json not found, continuing without NPX servers.")
+    except json.JSONDecodeError:
+        print("Error parsing npx_servers.json, continuing without NPX servers.")
+        
+    # Load configuration from uv_servers.json
+    try:
+        with open('uv_servers.json', 'r') as f:
+            uv_config = json.load(f)
+            uv_servers = uv_config.get('mcpServers', {})
+            for name, server in uv_servers.items():
+                servers[name] = server
+                server_types[name] = "uv"
+        print("Loaded UV servers configuration.")
+    except FileNotFoundError:
+        print("uv_servers.json not found, continuing without UV servers.")
+    except json.JSONDecodeError:
+        print("Error parsing uv_servers.json, continuing without UV servers.")
+    
+    # Check if we have any servers
     if not servers:
-        print("No MCP servers found in sse_servers.json")
+        print("No MCP servers found in configuration files.")
         return
     
-    print("Available MCP servers:")
-    for i, (name, server) in enumerate(servers.items(), 1):
-        print(f"{i}. {name}")
+    # Print available servers
+    print("\nAvailable MCP servers:")
+    for i, name in enumerate(servers.keys(), 1):
+        server_type = server_types[name]
+        print(f"{i}. {name} ({server_type.upper()})")
     
     # Ask user to select a server
     selection = input("\nSelect a server (number): ")
     try:
         index = int(selection) - 1
         selected_server = list(servers.keys())[index]
-        server_url = servers[selected_server]['url']
+        server_config = servers[selected_server]
+        server_type = server_types[selected_server]
     except (ValueError, IndexError):
         print("Invalid selection. Exiting.")
         return
     
-    print(f"Using server: {selected_server} ({server_url})")
-    
     client = MCPClient()
     try:
-        await client.connect_to_sse_server(server_url=server_url)
+        if server_type == "sse":
+            server_url = server_config['url']
+            print(f"Using SSE server: {selected_server} ({server_url})")
+            await client.connect_to_sse_server(server_url=server_url)
+        elif server_type in ["npx", "uv"]:
+            command = server_config['command']
+            args = server_config['args']
+            print(f"Using {server_type.upper()} server: {selected_server} ({command} {' '.join(args)})")
+            await client.connect_to_stdio_server(command=command, args=args)
+        
         await client.chat_loop()
     finally:
         await client.cleanup()

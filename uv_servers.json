@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "sqlite": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "parent_of_servers_repo/servers/src/sqlite",
+        "run",
+        "mcp-server-sqlite",
+        "--db-path",
+        "~/test.db"
+      ]
+    }
+  }
+}
