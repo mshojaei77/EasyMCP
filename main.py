@@ -10,6 +10,7 @@ from mcp.client.stdio import stdio_client
 
 from openai import OpenAI
 from dotenv import load_dotenv
+import anyio
 
 load_dotenv()  # load environment variables from .env
 
@@ -89,7 +90,27 @@ class MCPClient:
             }
         ]
 
-        response = await self.session.list_tools()
+        # Try to get tools list, with reconnection logic if needed
+        try:
+            response = await self.session.list_tools()
+        except anyio.BrokenResourceError:
+            print("Connection to server lost. Attempting to reconnect...")
+            # Get the current server details from the existing session
+            # This is a simplified reconnection - you might need to adjust based on server type
+            if hasattr(self._streams_context, 'url'):  # SSE connection
+                server_url = self._streams_context.url
+                await self.cleanup()
+                await self.connect_to_sse_server(server_url)
+            else:
+                print("Unable to automatically reconnect. Please restart the client.")
+                return "Connection to server lost. Please restart the client."
+            
+            # Try again after reconnection
+            try:
+                response = await self.session.list_tools()
+            except Exception as e:
+                return f"Failed to reconnect to server: {str(e)}"
+
         available_tools = [{ 
             "type": "function",
             "function": {
