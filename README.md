@@ -148,15 +148,11 @@ To add a new MCP server configuration:
 - **add_server.py:**  
   A script to add new MCP server configurations to the JSON files.
 
-- **UV_client.py & NPX_client.py:**  
-  Example client scripts that show how to connect to UV and NPX servers respectively.
-
 - **.env:**  
   Contains environment variables such as API keys and model configurations.
 
 - **requirements.txt:**  
   Lists the project dependencies.  
-  (Note: For JavaScript projects, remember to use `yarn` for dependency management; however, this project uses Python.)
 
 ## Contributing
 
