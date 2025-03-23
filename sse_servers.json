@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "@modelcontextprotocol/time": {
+      "url": "https://router.mcp.so/sse/pnabizm8lkazpr"
+    },
+    "@mendableai/firecrawl-mcp-server": {
+      "url": "https://router.mcp.so/sse/10cjcom8ljxq5l"
+    },
+    "@modelcontextprotocol/fetch": {
+      "url": "https://router.mcp.so/sse/lt1h2im8llmqnp"
+    }
+  }
+}
